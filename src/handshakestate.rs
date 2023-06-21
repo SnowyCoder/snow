@@ -197,6 +197,53 @@ impl HandshakeState {
         self.symmetricstate.has_key()
     }
 
+    /// Simulate the next message send/receive operation and calculate
+    /// how many bytes the Noise protocol will use.
+    ///
+    /// You can calculate the size of the final message as the value returned from
+    /// this function added to the payload size.
+    ///
+    /// # Errors
+    ///
+    /// Will result in `Error::Input` if an unexpected error is encountered during the simulation.
+    /// Will result in `StateProblem::HandshakeAlreadyFinished` if the handshake is complete.
+    pub fn get_next_message_overhead(&self) -> Result<usize, Error> {
+        if self.pattern_position >= self.message_patterns.len() {
+            return Err(StateProblem::HandshakeAlreadyFinished.into());
+        }
+
+        let mut enc_overhead = if self.symmetricstate.has_key() { TAGLEN } else { 0 };
+
+        let mut byte_index = 0;
+        for token in self.message_patterns[self.pattern_position].iter() {
+            byte_index += match token {
+                Token::E => {
+                    if self.params.handshake.is_psk() {
+                        enc_overhead = TAGLEN;// Encryption activated!
+                    }
+                    self.e.pub_len()// ephemeral keys are never encrypted
+                },
+                Token::S => self.s.pub_len() + enc_overhead,
+                Token::Psk(_n) => 0,
+                Token::Dh(_t) => {
+                    enc_overhead = TAGLEN; // Encryption surely enabled now
+                    0
+                },
+                #[cfg(feature = "hfs")]
+                Token::E1 => {
+                    let kem = self.kem.as_ref().ok_or(Error::Input)?;
+                    kem.pub_len() + enc_overhead
+                },
+                #[cfg(feature = "hfs")]
+                Token::Ekem1 => {
+                    let kem = self.kem.as_ref().unwrap();
+                    kem.ciphertext_len() + enc_overhead
+                },
+            };
+        }
+        Ok(byte_index + enc_overhead)
+    }
+
     /// Construct a message from `payload` (and pending handshake tokens if in handshake state),
     /// and write it to the `message` buffer.
     ///

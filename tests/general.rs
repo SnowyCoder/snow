@@ -324,6 +324,40 @@ fn test_NNhfs_sanity_session() {
     let len = h_r.read_message(&buffer_msg[..len], &mut buffer_out).unwrap();
     assert_eq!(&buffer_out[..len], b"hack the planet");
 }
+#[test]
+#[cfg(feature = "hfs")]
+#[cfg(feature = "pqclean_kyber1024")]
+fn test_NNhfs_overhead() {
+    // Due to how PQClean is implemented, we cannot do deterministic testing of the protocol.
+    // Instead, we will see if the protocol runs smoothly.
+    let params: NoiseParams = "Noise_NNhfs_25519+Kyber1024_ChaChaPoly_SHA256".parse().unwrap();
+    let mut h_i = Builder::new(params.clone()).build_initiator().unwrap();
+    let mut h_r = Builder::new(params).build_responder().unwrap();
+
+    let mut buffer_msg = [0u8; 4096];
+    let mut buffer_out = [0u8; 4096];
+    let msg_size = h_i.get_next_message_overhead().unwrap();
+    let msg_size2 = h_r.get_next_message_overhead().unwrap();
+    let len = h_i.write_message(b"abc", &mut buffer_msg).unwrap();
+    assert_eq!(msg_size, msg_size2);
+    assert_eq!(msg_size + 3, len);
+    h_r.read_message(&buffer_msg[..len], &mut buffer_out).unwrap();
+
+
+    let msg_size = h_i.get_next_message_overhead().unwrap();
+    let msg_size2 = h_r.get_next_message_overhead().unwrap();
+    let len = h_r.write_message(b"defg", &mut buffer_msg).unwrap();
+    assert_eq!(msg_size, msg_size2);
+    assert_eq!(msg_size + 4, len);
+    h_i.read_message(&buffer_msg[..len], &mut buffer_out).unwrap();
+
+    let mut h_i = h_i.into_transport_mode().unwrap();
+    let mut h_r = h_r.into_transport_mode().unwrap();
+
+    let len = h_i.write_message(b"hack the planet", &mut buffer_msg).unwrap();
+    let len = h_r.read_message(&buffer_msg[..len], &mut buffer_out).unwrap();
+    assert_eq!(&buffer_out[..len], b"hack the planet");
+}
 
 #[test]
 fn test_XXpsk0_expected_value() {
@@ -421,6 +455,61 @@ fn test_XXpsk3_sanity_session() {
 
     let len = h_i.write_message(b"hij", &mut buffer_msg).unwrap();
     h_r.read_message(&buffer_msg[..len], &mut buffer_out).unwrap();
+
+    let mut h_i = h_i.into_transport_mode().unwrap();
+    let mut h_r = h_r.into_transport_mode().unwrap();
+
+    let len = h_i.write_message(b"hack the planet", &mut buffer_msg).unwrap();
+    let len = h_r.read_message(&buffer_msg[..len], &mut buffer_out).unwrap();
+    assert_eq!(&buffer_out[..len], b"hack the planet");
+}
+
+#[test]
+fn test_XXpsk3_overhead() {
+    let params: NoiseParams = "Noise_XXpsk3_25519_ChaChaPoly_SHA256".parse().unwrap();
+    let b_i = Builder::new(params.clone());
+    let b_r = Builder::new(params);
+    let static_i = b_i.generate_keypair().unwrap();
+    let static_r = b_r.generate_keypair().unwrap();
+    let mut h_i = b_i
+        .psk(3, &[32u8; 32])
+        .local_private_key(&static_i.private)
+        .remote_public_key(&static_r.public)
+        .build_initiator()
+        .unwrap();
+    let mut h_r = b_r
+        .psk(3, &[32u8; 32])
+        .local_private_key(&static_r.private)
+        .remote_public_key(&static_i.public)
+        .build_responder()
+        .unwrap();
+
+    let mut buffer_msg = [0u8; 200];
+    let mut buffer_out = [0u8; 200];
+
+    let msg_size = h_i.get_next_message_overhead().unwrap();
+    let msg_size2 = h_r.get_next_message_overhead().unwrap();
+    let len = h_i.write_message(b"abc", &mut buffer_msg).unwrap();
+    assert_eq!(msg_size, msg_size2);
+    assert_eq!(msg_size + 3, len);
+    h_r.read_message(&buffer_msg[..len], &mut buffer_out).unwrap();
+
+    let msg_size = h_i.get_next_message_overhead().unwrap();
+    let msg_size2 = h_r.get_next_message_overhead().unwrap();
+    let len = h_r.write_message(b"defg", &mut buffer_msg).unwrap();
+    assert_eq!(msg_size, msg_size2);
+    assert_eq!(msg_size + 4, len);
+    h_i.read_message(&buffer_msg[..len], &mut buffer_out).unwrap();
+
+    let msg_size = h_i.get_next_message_overhead().unwrap();
+    let msg_size2 = h_r.get_next_message_overhead().unwrap();
+    let len = h_i.write_message(b"hij", &mut buffer_msg).unwrap();
+    assert_eq!(msg_size, msg_size2);
+    assert_eq!(msg_size + 3, len);
+    h_r.read_message(&buffer_msg[..len], &mut buffer_out).unwrap();
+
+    assert!(h_i.get_next_message_overhead().is_err());
+    assert!(h_r.get_next_message_overhead().is_err());
 
     let mut h_i = h_i.into_transport_mode().unwrap();
     let mut h_r = h_r.into_transport_mode().unwrap();
