@@ -22,7 +22,7 @@ impl CryptoResolver for RingResolver {
         Some(Box::new(RingRng::default()))
     }
 
-    fn resolve_dh(&self, _choice: &DHChoice) -> Option<Box<dyn Dh>> {
+    fn resolve_dh(&self, _choice: &DHChoice, _elligator_encoded: bool) -> Option<Box<dyn Dh>> {
         None
     }
 

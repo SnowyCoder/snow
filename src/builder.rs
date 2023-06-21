@@ -53,6 +53,7 @@ pub struct Builder<'builder> {
     s:        Option<&'builder [u8]>,
     e_fixed:  Option<&'builder [u8]>,
     rs:       Option<&'builder [u8]>,
+    elligator: bool,
     psks:     [Option<&'builder [u8]>; 10],
     plog:     Option<&'builder [u8]>,
 }
@@ -93,7 +94,13 @@ impl<'builder> Builder<'builder> {
 
     /// Create a Builder with a custom crypto resolver.
     pub fn with_resolver(params: NoiseParams, resolver: BoxedCryptoResolver) -> Self {
-        Builder { params, resolver, s: None, e_fixed: None, rs: None, plog: None, psks: [None; 10] }
+        Builder { params, resolver, s: None, e_fixed: None, rs: None, plog: None, psks: [None; 10], elligator: false }
+    }
+
+    /// Specify to encode ephemeral keys using the elligator point2hash encoding.
+    pub fn elligator_encoded_ephemeral_keys(mut self) -> Self {
+        self.elligator = true;
+        self
     }
 
     /// Specify a PSK (only used with `NoisePSK` base parameter)
@@ -132,7 +139,7 @@ impl<'builder> Builder<'builder> {
     /// Generate a new asymmetric keypair (for use as a static key).
     pub fn generate_keypair(&self) -> Result<Keypair, Error> {
         let mut rng = self.resolver.resolve_rng().ok_or(InitStage::GetRngImpl)?;
-        let mut dh = self.resolver.resolve_dh(&self.params.dh).ok_or(InitStage::GetDhImpl)?;
+        let mut dh = self.resolver.resolve_dh(&self.params.dh, false).ok_or(InitStage::GetDhImpl)?;
         let mut private = vec![0u8; dh.priv_len()];
         let mut public = vec![0u8; dh.pub_len()];
         dh.generate(&mut *rng);
@@ -166,8 +173,8 @@ impl<'builder> Builder<'builder> {
         let cipher =
             self.resolver.resolve_cipher(&self.params.cipher).ok_or(InitStage::GetCipherImpl)?;
         let hash = self.resolver.resolve_hash(&self.params.hash).ok_or(InitStage::GetHashImpl)?;
-        let mut s_dh = self.resolver.resolve_dh(&self.params.dh).ok_or(InitStage::GetDhImpl)?;
-        let mut e_dh = self.resolver.resolve_dh(&self.params.dh).ok_or(InitStage::GetDhImpl)?;
+        let mut s_dh = self.resolver.resolve_dh(&self.params.dh, false).ok_or(InitStage::GetDhImpl)?;
+        let mut e_dh = self.resolver.resolve_dh(&self.params.dh, self.elligator).ok_or(InitStage::GetDhImpl)?;
         let cipher1 =
             self.resolver.resolve_cipher(&self.params.cipher).ok_or(InitStage::GetCipherImpl)?;
         let cipher2 =
@@ -218,6 +225,7 @@ impl<'builder> Builder<'builder> {
             s,
             e,
             self.e_fixed.is_some(),
+            self.elligator,
             rs,
             re,
             initiator,

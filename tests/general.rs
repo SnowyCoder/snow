@@ -69,8 +69,8 @@ impl CryptoResolver for TestResolver {
         Some(Box::new(rng))
     }
 
-    fn resolve_dh(&self, choice: &DHChoice) -> Option<Box<dyn Dh>> {
-        self.parent.resolve_dh(choice)
+    fn resolve_dh(&self, choice: &DHChoice, elligator_encode: bool) -> Option<Box<dyn Dh>> {
+        self.parent.resolve_dh(choice, elligator_encode)
     }
 
     fn resolve_hash(&self, choice: &HashChoice) -> Option<Box<dyn Hash>> {
@@ -157,6 +157,45 @@ fn test_sanity_aesgcm_session() {
 
     let len = h_r.write_message(b"defg", &mut buffer_msg).unwrap();
     h_i.read_message(&buffer_msg[..len], &mut buffer_out).unwrap();
+
+    let mut h_i = h_i.into_transport_mode().unwrap();
+    let mut h_r = h_r.into_transport_mode().unwrap();
+
+    let len = h_i.write_message(b"hack the planet", &mut buffer_msg).unwrap();
+    let len = h_r.read_message(&buffer_msg[..len], &mut buffer_out).unwrap();
+    assert_eq!(&buffer_out[..len], b"hack the planet");
+}
+
+#[test]
+fn test_sanity_elligator_session() {
+    let params: NoiseParams = "Noise_XX_25519_ChaChaPoly_SHA256".parse().unwrap();
+    let mut h_i = Builder::new(params.clone())
+        .local_private_key(&get_inc_key(0))
+        .remote_public_key(&x25519::x25519(get_inc_key(1), x25519::X25519_BASEPOINT_BYTES))
+        .elligator_encoded_ephemeral_keys()
+        .build_initiator()
+        .unwrap();
+    let mut h_r = Builder::new(params)
+        .local_private_key(&get_inc_key(1))
+        .remote_public_key(&x25519::x25519(get_inc_key(0), x25519::X25519_BASEPOINT_BYTES))
+        .elligator_encoded_ephemeral_keys()
+        .build_responder()
+        .unwrap();
+
+    let mut buffer_msg = [0u8; 200];
+    let mut buffer_out = [0u8; 200];
+
+    // -> e
+    let len = h_i.write_message(b"abc", &mut buffer_msg).unwrap();
+    h_r.read_message(&buffer_msg[..len], &mut buffer_out).unwrap();
+
+    // <-- e, ee, s, ss
+    let len = h_r.write_message(b"defg", &mut buffer_msg).unwrap();
+    h_i.read_message(&buffer_msg[..len], &mut buffer_out).unwrap();
+
+    // -> s, se (done)
+    let len = h_i.write_message(b"hij", &mut buffer_msg).unwrap();
+    h_r.read_message(&buffer_msg[..len], &mut buffer_out).unwrap();
 
     let mut h_i = h_i.into_transport_mode().unwrap();
     let mut h_r = h_r.into_transport_mode().unwrap();

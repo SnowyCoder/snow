@@ -33,7 +33,7 @@ pub trait Dh: Send + Sync {
     fn privkey(&self) -> &[u8];
 
     /// Calculate a Diffie-Hellman exchange.
-    fn dh(&self, pubkey: &[u8], out: &mut [u8]) -> Result<(), Error>;
+    fn dh(&self, pubkey: &[u8], out: &mut [u8], is_pubkey_elligator_encoded: bool) -> Result<(), Error>;
 }
 
 /// Cipher operations

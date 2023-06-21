@@ -35,7 +35,7 @@ pub trait CryptoResolver {
     fn resolve_rng(&self) -> Option<Box<dyn Random>>;
 
     /// Provide an implementation of the Dh trait for the given DHChoice or None if unavailable.
-    fn resolve_dh(&self, choice: &DHChoice) -> Option<Box<dyn Dh>>;
+    fn resolve_dh(&self, choice: &DHChoice, elligator_encoded: bool) -> Option<Box<dyn Dh>>;
 
     /// Provide an implementation of the Hash trait for the given HashChoice or None if unavailable.
     fn resolve_hash(&self, choice: &HashChoice) -> Option<Box<dyn Hash>>;
@@ -70,8 +70,8 @@ impl CryptoResolver for FallbackResolver {
         self.preferred.resolve_rng().or_else(|| self.fallback.resolve_rng())
     }
 
-    fn resolve_dh(&self, choice: &DHChoice) -> Option<Box<dyn Dh>> {
-        self.preferred.resolve_dh(choice).or_else(|| self.fallback.resolve_dh(choice))
+    fn resolve_dh(&self, choice: &DHChoice, elligator_encoded: bool) -> Option<Box<dyn Dh>> {
+        self.preferred.resolve_dh(choice, elligator_encoded).or_else(|| self.fallback.resolve_dh(choice, elligator_encoded))
     }
 
     fn resolve_hash(&self, choice: &HashChoice) -> Option<Box<dyn Hash>> {

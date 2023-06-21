@@ -33,6 +33,7 @@ pub struct HandshakeState {
     pub(crate) s:                Toggle<Box<dyn Dh>>,
     pub(crate) e:                Toggle<Box<dyn Dh>>,
     pub(crate) fixed_ephemeral:  bool,
+    pub(crate) elligator_ephemeral: bool,
     pub(crate) rs:               Toggle<[u8; MAXDHLEN]>,
     pub(crate) re:               Toggle<[u8; MAXDHLEN]>,
     pub(crate) initiator:        bool,
@@ -56,6 +57,7 @@ impl HandshakeState {
         s: Toggle<Box<dyn Dh>>,
         e: Toggle<Box<dyn Dh>>,
         fixed_ephemeral: bool,
+        elligator_ephemeral: bool,
         rs: Toggle<[u8; MAXDHLEN]>,
         re: Toggle<[u8; MAXDHLEN]>,
         initiator: bool,
@@ -136,6 +138,7 @@ impl HandshakeState {
             s,
             e,
             fixed_ephemeral,
+            elligator_ephemeral,
             rs,
             re,
             initiator,
@@ -162,16 +165,16 @@ impl HandshakeState {
 
     fn dh(&self, token: &DhToken) -> Result<[u8; MAXDHLEN], Error> {
         let mut dh_out = [0u8; MAXDHLEN];
-        let (dh, key) = match (token, self.is_initiator()) {
-            (DhToken::Ee, _) => (&self.e, &self.re),
-            (DhToken::Ss, _) => (&self.s, &self.rs),
-            (DhToken::Se, true) | (DhToken::Es, false) => (&self.s, &self.re),
-            (DhToken::Es, true) | (DhToken::Se, false) => (&self.e, &self.rs),
+        let (dh, key, elligator_encoded) = match (token, self.is_initiator()) {
+            (DhToken::Ee, _) => (&self.e, &self.re, self.elligator_ephemeral),
+            (DhToken::Ss, _) => (&self.s, &self.rs, false),
+            (DhToken::Se, true) | (DhToken::Es, false) => (&self.s, &self.re, self.elligator_ephemeral),
+            (DhToken::Es, true) | (DhToken::Se, false) => (&self.e, &self.rs, false),
         };
         if !(dh.is_on() && key.is_on()) {
             return Err(StateProblem::MissingKeyMaterial.into());
         }
-        dh.dh(&**key, &mut dh_out)?;
+        dh.dh(&**key, &mut dh_out, elligator_encoded)?;
         Ok(dh_out)
     }
 

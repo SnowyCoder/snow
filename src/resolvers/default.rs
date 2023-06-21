@@ -5,7 +5,7 @@ use chacha20poly1305::{
     aead::{AeadInPlace, NewAead},
     ChaCha20Poly1305,
 };
-use curve25519_dalek::{edwards::EdwardsPoint, montgomery::MontgomeryPoint, scalar::Scalar};
+use curve25519_dalek::{edwards::EdwardsPoint, montgomery::MontgomeryPoint};
 #[cfg(feature = "pqclean_kyber1024")]
 use pqcrypto_kyber::kyber1024;
 #[cfg(feature = "pqclean_kyber1024")]
@@ -36,9 +36,9 @@ impl CryptoResolver for DefaultResolver {
         Some(Box::new(OsRng::default()))
     }
 
-    fn resolve_dh(&self, choice: &DHChoice) -> Option<Box<dyn Dh>> {
+    fn resolve_dh(&self, choice: &DHChoice, elligator_encoded: bool) -> Option<Box<dyn Dh>> {
         match *choice {
-            DHChoice::Curve25519 => Some(Box::new(Dh25519::default())),
+            DHChoice::Curve25519 => Some(Box::new(Dh25519::new(elligator_encoded))),
             _ => None,
         }
     }
@@ -69,11 +69,17 @@ impl CryptoResolver for DefaultResolver {
     }
 }
 
+#[derive(Default)]
+struct ElligatorData {
+    tweak: u8,
+}
+
 /// Wraps x25519-dalek.
 #[derive(Default)]
 struct Dh25519 {
-    privkey: Scalar,
+    privkey: [u8; 32],
     pubkey:  [u8; 32],
+    elligator: Option<ElligatorData>,
 }
 
 /// Wraps `aes-gcm`'s AES256-GCM implementation.
@@ -127,20 +133,29 @@ struct Kyber1024 {
 impl Random for OsRng {}
 
 impl Dh25519 {
-    fn derive_pubkey(&mut self) {
+    fn derive_pubkey(&mut self) -> Result<(), ()> {
         // TODO: use `MontgomeryPoint::mul_base` in final v4 release of curve25519-dalek
         // See dalek-cryptography/curve25519-dalek#503
-        let point = EdwardsPoint::mul_base(&self.privkey).to_montgomery();
-        self.pubkey = point.to_bytes();
+        self.pubkey = match &self.elligator {
+            None => EdwardsPoint::mul_base_clamped(self.privkey).to_montgomery().to_bytes(),
+            Some(data) => MontgomeryPoint::generate_ephemeral_elligator(self.privkey)
+                    .to_elligator_representative(data.tweak)
+                    .ok_or(())?
+        };
+        Ok(())
     }
-}
 
-fn clamp_scalar(mut scalar: [u8; 32]) -> Scalar {
-    scalar[0] &= 248;
-    scalar[31] &= 127;
-    scalar[31] |= 64;
-
-    Scalar::from_bits(scalar)
+    pub fn new(elligator_encoded: bool) -> Self {
+        let elligator = if elligator_encoded {
+            Some(Default::default())
+        } else {
+            None
+        };
+        Dh25519 {
+            elligator,
+            ..Default::default()
+        }
+    }
 }
 
 impl Dh for Dh25519 {
@@ -159,15 +174,24 @@ impl Dh for Dh25519 {
     fn set(&mut self, privkey: &[u8]) {
         let mut bytes = [0u8; 32];
         copy_slices!(privkey, bytes);
-        self.privkey = clamp_scalar(bytes);
-        self.derive_pubkey();
+        self.privkey = bytes;
+        self.derive_pubkey().expect("Key cannot be elligator encoded");
     }
 
     fn generate(&mut self, rng: &mut dyn Random) {
-        let mut bytes = [0u8; 32];
-        rng.fill_bytes(&mut bytes);
-        self.privkey = clamp_scalar(bytes);
-        self.derive_pubkey();
+        loop {
+            let mut bytes = [0u8; 32];
+            rng.fill_bytes(&mut bytes);
+            self.privkey = bytes;
+            if let Some(eldata) = self.elligator.as_mut() {
+                let mut tweak_data = [0u8; 1];
+                rng.fill_bytes(&mut tweak_data);
+                eldata.tweak = tweak_data[0];
+            }
+            if self.derive_pubkey().is_ok() {
+                break
+            }
+        }
     }
 
     fn pubkey(&self) -> &[u8] {
@@ -175,13 +199,20 @@ impl Dh for Dh25519 {
     }
 
     fn privkey(&self) -> &[u8] {
-        self.privkey.as_bytes()
+        self.privkey.as_slice()
     }
 
-    fn dh(&self, pubkey: &[u8], out: &mut [u8]) -> Result<(), Error> {
+    fn dh(&self, pubkey: &[u8], out: &mut [u8], is_pubkey_elligator_encoded: bool) -> Result<(), Error> {
         let mut pubkey_owned = [0u8; 32];
         copy_slices!(&pubkey[..32], pubkey_owned);
-        let result = (self.privkey * MontgomeryPoint(pubkey_owned)).to_bytes();
+
+        let pub_point = if is_pubkey_elligator_encoded {
+            MontgomeryPoint::from_elligator_representative(&pubkey_owned)
+        } else {
+            MontgomeryPoint(pubkey_owned)
+        };
+
+        let result = pub_point.mul_clamped(self.privkey).to_bytes();
         copy_slices!(result, out);
         Ok(())
     }
@@ -618,7 +649,7 @@ mod tests {
             Vec::<u8>::from_hex("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c")
                 .unwrap();
         let mut output = [0u8; 32];
-        keypair.dh(&public, &mut output).unwrap();
+        keypair.dh(&public, &mut output, false).unwrap();
         assert_eq!(
             hex::encode(output),
                 "c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552"

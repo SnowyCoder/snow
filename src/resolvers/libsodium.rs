@@ -24,7 +24,10 @@ impl CryptoResolver for SodiumResolver {
         Some(Box::new(SodiumRng::default()))
     }
 
-    fn resolve_dh(&self, choice: &DHChoice) -> Option<Box<dyn Dh>> {
+    fn resolve_dh(&self, choice: &DHChoice, elligator_encoded: bool) -> Option<Box<dyn Dh>> {
+        if elligator_encoded {
+            return None
+        }
         match *choice {
             DHChoice::Curve25519 => Some(Box::new(SodiumDh25519::default())),
             _ => None,
@@ -109,7 +112,11 @@ impl Dh for SodiumDh25519 {
         &self.privkey[0..32]
     }
 
-    fn dh(&self, pubkey: &[u8], out: &mut [u8]) -> Result<(), Error> {
+    fn dh(&self, pubkey: &[u8], out: &mut [u8], is_pubkey_elligator_encoded: bool) -> Result<(), Error> {
+        if is_pubkey_elligator_encoded {
+            return Err(Error::Dh);
+        }
+
         let pubkey = sodium_curve25519::GroupElement::from_slice(&pubkey[0..32])
             .expect("Can't construct public key for Dh25519");
         let result = sodium_curve25519::scalarmult(&self.privkey, &pubkey);
@@ -274,7 +281,7 @@ mod tests {
             Vec::<u8>::from_hex("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c")
                 .unwrap();
         let mut output = [0u8; 32];
-        keypair.dh(&public, &mut output).expect("Can't calculate DH");
+        keypair.dh(&public, &mut output, false).expect("Can't calculate DH");
 
         assert_eq!(
             output,
@@ -297,10 +304,10 @@ mod tests {
 
         // Create shared secrets with public keys of each other.
         let mut our_shared_secret = [0u8; 32];
-        keypair_a.dh(keypair_b.pubkey(), &mut our_shared_secret).expect("Can't calculate DH");
+        keypair_a.dh(keypair_b.pubkey(), &mut our_shared_secret, false).expect("Can't calculate DH");
 
         let mut remote_shared_secret = [0u8; 32];
-        keypair_b.dh(keypair_a.pubkey(), &mut remote_shared_secret).expect("Can't calculate DH");
+        keypair_b.dh(keypair_a.pubkey(), &mut remote_shared_secret, false).expect("Can't calculate DH");
 
         // Results are expected to be the same.
         assert_eq!(our_shared_secret, remote_shared_secret);
